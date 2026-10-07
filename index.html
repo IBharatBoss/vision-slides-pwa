@@ -1,0 +1,989 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Vision Slides">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <title>Vision Slides | World-Class Presentation Studio</title>
+    
+    <!-- CanvasTextBaseline Fix for Fabric.js / Chrome -->
+    <script>
+        (function() {
+            try {
+                const proto = CanvasRenderingContext2D.prototype;
+                const desc = Object.getOwnPropertyDescriptor(proto, 'textBaseline');
+                if (desc && desc.set) {
+                    Object.defineProperty(proto, 'textBaseline', {
+                        get: function() { return desc.get.call(this); },
+                        set: function(val) {
+                            if (val === 'alphabetical') val = 'alphabetic';
+                            desc.set.call(this, val);
+                        },
+                        configurable: true,
+                        enumerable: true
+                    });
+                }
+            } catch (e) {}
+        })();
+    </script>
+
+    <!-- Core External Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+    <script>
+        // Bulletproof Protection: Prevent Chrome focus scroll & lock Fabric hidden textarea
+        (function() {
+            try {
+                const origFocus = HTMLElement.prototype.focus;
+                HTMLElement.prototype.focus = function(options) {
+                    if ((this.classList && this.classList.contains('fabric-canvas-hidden-textarea')) || this.hasAttribute('data-fabric-hiddentextarea')) {
+                        return origFocus.call(this, { preventScroll: true });
+                    }
+                    return origFocus.apply(this, arguments);
+                };
+
+                window.addEventListener('scroll', function() {
+                    if (window.scrollX !== 0 || window.scrollY !== 0) {
+                        window.scrollTo(0, 0);
+                    }
+                }, { passive: false });
+
+                if (window.fabric && fabric.IText) {
+                    fabric.IText.prototype._calcTextareaPosition = function() {
+                        return { left: '10px', top: '10px' };
+                    };
+                    const origInitHidden = fabric.IText.prototype.initHiddenTextarea;
+                    fabric.IText.prototype.initHiddenTextarea = function() {
+                        origInitHidden.call(this);
+                        if (this.hiddenTextarea) {
+                            this.hiddenTextarea.style.position = 'fixed';
+                            this.hiddenTextarea.style.top = '10px';
+                            this.hiddenTextarea.style.left = '10px';
+                            this.hiddenTextarea.style.width = '1px';
+                            this.hiddenTextarea.style.height = '1px';
+                            this.hiddenTextarea.style.opacity = '0';
+                            this.hiddenTextarea.style.pointerEvents = 'none';
+                            this.hiddenTextarea.style.zIndex = '-99999';
+                        }
+                    };
+                    fabric.IText.prototype.updateTextareaPosition = function() {
+                        if (this.hiddenTextarea) {
+                            this.hiddenTextarea.style.position = 'fixed';
+                            this.hiddenTextarea.style.top = '10px';
+                            this.hiddenTextarea.style.left = '10px';
+                        }
+                    };
+                }
+            } catch (err) {}
+        })();
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dexie/3.2.4/dexie.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- Google Fonts & Material Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&family=Playfair+Display:ital,wght@0,600;0,700;1,600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
+
+    <!-- Pure White Studio Styles -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- 1. TOP HEADER NAVIGATION -->
+    <header id="top-bar">
+        <div class="top-bar-left">
+            <!-- Mobile Slides Drawer Toggle -->
+            <button class="mobile-reel-toggle-btn mobile-only-flex" id="btn-toggle-slide-reel" title="Open Slide Drawer">
+                <span class="material-icons-round">view_sidebar</span>
+                <span id="mobile-slide-pill-counter">1/1</span>
+            </button>
+
+            <div class="brand-badge" title="Vision Presentation Studio">
+                <span class="material-icons-round">slideshow</span>
+                <span class="brand-text">Vision Slides</span>
+            </div>
+            
+            <div class="deck-title-wrapper">
+                <input type="text" id="deck-title-input" value="Vision Pitch 2026" title="Click to rename presentation" spellcheck="false" />
+            </div>
+        </div>
+
+        <div class="top-bar-center desktop-only-flex">
+            <!-- Undo / Redo Buttons -->
+            <button class="icon-btn-ghost" id="btn-undo" title="Undo (Ctrl+Z)">
+                <span class="material-icons-round">undo</span>
+            </button>
+            <button class="icon-btn-ghost" id="btn-redo" title="Redo (Ctrl+Y)">
+                <span class="material-icons-round">redo</span>
+            </button>
+
+            <div class="header-v-sep"></div>
+
+            <!-- Custom SaaS Aspect Ratio Dropdown -->
+            <div class="saas-dropdown" id="dropdown-ratio">
+                <button class="dropdown-trigger" type="button" title="Slide Aspect Ratio">
+                    <span class="material-icons-round trigger-icon">aspect_ratio</span>
+                    <span class="dropdown-value" id="val-ratio">16:9 Widescreen</span>
+                    <span class="material-icons-round chevron-icon">expand_more</span>
+                </button>
+                <div class="dropdown-popover hidden" id="popover-ratio">
+                    <div class="dropdown-item active" data-value="16:9">
+                        <span class="material-icons-round item-icon">tv</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">16:9 Widescreen</span>
+                            <span class="item-sub">1920 × 1080 (Modern Standard)</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                    <div class="dropdown-item" data-value="4:3">
+                        <span class="material-icons-round item-icon">crop_free</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">4:3 Standard</span>
+                            <span class="item-sub">1440 × 1080 (Classic Projector)</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                    <div class="dropdown-item" data-value="9:16">
+                        <span class="material-icons-round item-icon">stay_current_portrait</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">9:16 Mobile Story</span>
+                            <span class="item-sub">1080 × 1920 (Vertical Deck)</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Custom SaaS Slide Transition Dropdown -->
+            <div class="saas-dropdown" id="dropdown-transition">
+                <button class="dropdown-trigger" type="button" title="Slide Transition Effect">
+                    <span class="material-icons-round trigger-icon">auto_awesome</span>
+                    <span class="dropdown-value" id="val-transition">Smooth Fade</span>
+                    <span class="material-icons-round chevron-icon">expand_more</span>
+                </button>
+                <div class="dropdown-popover hidden" id="popover-transition">
+                    <div class="dropdown-item active" data-value="fade">
+                        <span class="material-icons-round item-icon">blur_on</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Smooth Fade</span>
+                            <span class="item-sub">Gentle opacity cross-fade</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                    <div class="dropdown-item" data-value="zoom">
+                        <span class="material-icons-round item-icon">zoom_in</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Dynamic Zoom</span>
+                            <span class="item-sub">Subtle scale & reveal</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                    <div class="dropdown-item" data-value="push">
+                        <span class="material-icons-round item-icon">east</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Slide Push</span>
+                            <span class="item-sub">Smooth horizontal glide</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                    <div class="dropdown-item" data-value="none">
+                        <span class="material-icons-round item-icon">flash_on</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Instant</span>
+                            <span class="item-sub">Direct slide switch</span>
+                        </div>
+                        <span class="material-icons-round check-icon">check</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="top-bar-right">
+            <!-- PWA Native Install Button -->
+            <button class="pwa-install-btn hidden" id="btn-pwa-install" title="Install Vision Slides App">
+                <span class="material-icons-round">install_mobile</span>
+                <span class="pwa-btn-text">Install</span>
+            </button>
+
+            <!-- Undo / Redo for Mobile (Compact, clean touch buttons) -->
+            <button class="icon-btn-ghost mobile-only-flex" id="btn-undo-mobile" title="Undo (Ctrl+Z)">
+                <span class="material-icons-round">undo</span>
+            </button>
+            <button class="icon-btn-ghost mobile-only-flex" id="btn-redo-mobile" title="Redo (Ctrl+Y)">
+                <span class="material-icons-round">redo</span>
+            </button>
+
+            <button class="secondary-header-btn desktop-only" id="btn-toggle-notes" title="Toggle Speaker Notes">
+                <span class="material-icons-round">notes</span>
+                <span>Speaker Notes</span>
+            </button>
+
+            <!-- Export Dropdown -->
+            <div class="desktop-only" style="position: relative;">
+                <button class="secondary-header-btn" id="btn-export-dropdown" title="Export Presentation">
+                    <span class="material-icons-round">file_download</span>
+                    <span>Export</span>
+                </button>
+
+                <div id="export-menu-dropdown" class="dropdown-popover export-popover hidden">
+                    <button class="dropdown-item" id="export-pdf-action">
+                        <span class="material-icons-round item-icon" style="color: #ef4444;">picture_as_pdf</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Download as PDF</span>
+                            <span class="item-sub">Multi-page print-ready deck</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="export-png-all-action">
+                        <span class="material-icons-round item-icon" style="color: #2563eb;">collections</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Export PNG Slides</span>
+                            <span class="item-sub">Individual HD slide images</span>
+                        </div>
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <button class="dropdown-item" id="export-json-action">
+                        <span class="material-icons-round item-icon" style="color: #10b981;">save</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Backup Project (.json)</span>
+                            <span class="item-sub">Portable offline project backup</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="import-json-action">
+                        <span class="material-icons-round item-icon" style="color: #8b5cf6;">folder_open</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Import Project (.json)</span>
+                            <span class="item-sub">Load presentation from file</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+
+            <input type="file" id="import-file-input" accept=".json,.pptjson" style="display: none;" />
+
+            <!-- Hero Present Button -->
+            <button class="hero-present-btn" id="btn-present" title="Start Fullscreen Presentation (F5)">
+                <span class="material-icons-round">play_arrow</span>
+                <span class="present-btn-text">Present</span>
+            </button>
+
+            <!-- Mobile More Menu -->
+            <div class="mobile-more-wrapper mobile-only-flex" style="position: relative;">
+                <button class="icon-btn-ghost" id="btn-mobile-more" title="More Options">
+                    <span class="material-icons-round">more_vert</span>
+                </button>
+                <div class="dropdown-popover mobile-more-popover hidden" id="popover-mobile-more">
+                    <div class="mobile-menu-section-label">ASPECT RATIO</div>
+                    <button class="dropdown-item" id="mobile-ratio-16-9">
+                        <span class="material-icons-round item-icon" style="color: #2563eb;">tv</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">16:9 Widescreen</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-ratio-4-3">
+                        <span class="material-icons-round item-icon">crop_free</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">4:3 Standard</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-ratio-9-16">
+                        <span class="material-icons-round item-icon">stay_current_portrait</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">9:16 Mobile Story</span>
+                        </div>
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <div class="mobile-menu-section-label">TRANSITIONS</div>
+                    <button class="dropdown-item" id="mobile-trans-fade">
+                        <span class="material-icons-round item-icon">blur_on</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Smooth Fade</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-trans-zoom">
+                        <span class="material-icons-round item-icon">zoom_in</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Dynamic Zoom</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-trans-push">
+                        <span class="material-icons-round item-icon">east</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Slide Push</span>
+                        </div>
+                    </button>
+                    <div class="dropdown-divider"></div>
+                    <div class="mobile-menu-section-label">TOOLS & EXPORT</div>
+                    <button class="dropdown-item" id="mobile-action-templates">
+                        <span class="material-icons-round item-icon" style="color: #8b5cf6;">auto_awesome</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Slide Templates</span>
+                            <span class="item-sub">Curated layout library</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-action-notes">
+                        <span class="material-icons-round item-icon">notes</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Speaker Notes</span>
+                            <span class="item-sub">Toggle presenter notes</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-action-export-pdf">
+                        <span class="material-icons-round item-icon" style="color: #ef4444;">picture_as_pdf</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Export PDF</span>
+                            <span class="item-sub">Download multi-page deck</span>
+                        </div>
+                    </button>
+                    <button class="dropdown-item" id="mobile-action-export-png">
+                        <span class="material-icons-round item-icon" style="color: #2563eb;">collections</span>
+                        <div class="dropdown-item-info">
+                            <span class="item-title">Export PNG Slides</span>
+                            <span class="item-sub">HD slide images</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 2. SMART SAAS RIBBON TOOLBAR (Fixed secondary ribbon, zero floating clutter) -->
+    <section id="saas-ribbon">
+        <!-- Left: Insert Tools -->
+        <div class="ribbon-insert-tools">
+            <button class="ribbon-tool-btn active" id="tool-select" title="Selection Tool (V)">
+                <span class="material-icons-round">near_me</span>
+                <span>Select</span>
+            </button>
+
+            <div class="ribbon-sep"></div>
+
+            <button class="ribbon-tool-btn" id="tool-add-heading" title="Add Large Heading">
+                <span class="material-icons-round">title</span>
+                <span>Title</span>
+            </button>
+            <button class="ribbon-tool-btn" id="tool-add-subheading" title="Add Subheading">
+                <span class="material-icons-round">text_fields</span>
+                <span>Subtitle</span>
+            </button>
+            <button class="ribbon-tool-btn" id="tool-add-body" title="Add Body Text">
+                <span class="material-icons-round">notes</span>
+                <span>Body</span>
+            </button>
+
+            <div class="ribbon-sep"></div>
+
+            <button class="ribbon-tool-btn" id="tool-add-card" title="Add Presentation Card Box">
+                <span class="material-icons-round">crop_landscape</span>
+                <span>Card</span>
+            </button>
+            <button class="ribbon-tool-btn" id="tool-add-circle" title="Add Circle / Badge">
+                <span class="material-icons-round">radio_button_unchecked</span>
+                <span>Circle</span>
+            </button>
+            <button class="ribbon-tool-btn" id="tool-add-line" title="Add Flow Line / Connector">
+                <span class="material-icons-round">trending_flat</span>
+                <span>Line</span>
+            </button>
+
+            <div class="ribbon-sep"></div>
+
+            <input type="file" id="slide-img-upload-input" accept="image/*" style="display: none;" />
+            <button class="ribbon-tool-btn" id="tool-upload-image" title="Upload Image to Slide">
+                <span class="material-icons-round">add_photo_alternate</span>
+                <span>Image</span>
+            </button>
+
+            <button class="ribbon-tool-btn" id="tool-draw-pen" title="Freehand Highlighter Pen">
+                <span class="material-icons-round">edit</span>
+                <span>Pen</span>
+            </button>
+
+            <!-- Mobile Quick Access Tools -->
+            <button class="ribbon-tool-btn mobile-only-flex" id="tool-mobile-bg" title="Slide Background Color">
+                <span class="material-icons-round">palette</span>
+                <span>Background</span>
+            </button>
+            <button class="ribbon-tool-btn mobile-only-flex" id="tool-mobile-templates" title="Slide Templates">
+                <span class="material-icons-round" style="color: #2563eb;">auto_awesome</span>
+                <span>Templates</span>
+            </button>
+        </div>
+
+        <div class="ribbon-big-sep"></div>
+
+        <!-- Right/Center: Dynamic Contextual Inspector -->
+        <div class="ribbon-context-container">
+            <!-- Mobile Quick Done / Deselect Button (Always at start of editing controls) -->
+            <button class="ribbon-done-btn mobile-only-flex" id="btn-mobile-done-edit" title="Done Formatting">
+                <span class="material-icons-round">check</span>
+                <span>Done</span>
+            </button>
+
+            <!-- Context 1: Slide Settings (Active when canvas background is clicked) -->
+            <div class="ribbon-context-panel" id="context-panel-slide">
+                <span class="context-badge">Slide</span>
+                <span class="context-label">Background:</span>
+                <div class="palette-group">
+                    <button class="palette-swatch" id="bg-white" style="background: #ffffff;" title="Crisp White"></button>
+                    <button class="palette-swatch" id="bg-slate" style="background: #f8fafc;" title="Soft Slate"></button>
+                    <button class="palette-swatch" id="bg-warm" style="background: #fefce8;" title="Warm Editorial"></button>
+                    <button class="palette-swatch" id="bg-dark" style="background: #0f172a;" title="Executive Dark"></button>
+                    <button class="palette-swatch" id="bg-blue" style="background: #eff6ff;" title="Ice Blue"></button>
+                    <input type="color" id="slide-bg-custom-picker" value="#ffffff" title="Custom Background Color" class="swatch-color-picker" />
+                </div>
+
+                <div class="ribbon-sep"></div>
+
+                <button class="ribbon-action-btn" id="btn-ribbon-templates" title="Choose from Curated Layouts">
+                    <span class="material-icons-round" style="color: #2563eb;">auto_awesome</span>
+                    <span>Layout Templates</span>
+                </button>
+            </div>
+
+            <!-- Context 2: Text Formatting (Active when text is selected) -->
+            <div class="ribbon-context-panel hidden" id="context-panel-text">
+                <span class="context-badge">Text</span>
+
+                <!-- Custom Font Dropdown -->
+                <div class="saas-dropdown font-dropdown" id="dropdown-font">
+                    <button class="dropdown-trigger font-trigger" type="button" title="Font Family">
+                        <span class="dropdown-value" id="val-font" style="font-family: 'Inter', sans-serif;">Inter</span>
+                        <span class="material-icons-round chevron-icon">expand_more</span>
+                    </button>
+                    <div class="dropdown-popover font-popover hidden">
+                        <div class="dropdown-item active" data-font="Inter" style="font-family: 'Inter', sans-serif;">
+                            <span class="material-icons-round item-icon">font_download</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Inter</span>
+                                <span class="item-sub">Clean Modern UI</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                        <div class="dropdown-item" data-font="Outfit" style="font-family: 'Outfit', sans-serif;">
+                            <span class="material-icons-round item-icon">title</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Outfit</span>
+                                <span class="item-sub">Bold Display Headings</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                        <div class="dropdown-item" data-font="Playfair Display" style="font-family: 'Playfair Display', serif;">
+                            <span class="material-icons-round item-icon">auto_stories</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Playfair Display</span>
+                                <span class="item-sub">Luxury Editorial Serif</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                        <div class="dropdown-item" data-font="Space Grotesk" style="font-family: 'Space Grotesk', sans-serif;">
+                            <span class="material-icons-round item-icon">terminal</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Space Grotesk</span>
+                                <span class="item-sub">Modern Tech Editorial</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                        <div class="dropdown-item" data-font="Helvetica" style="font-family: Helvetica, Arial, sans-serif;">
+                            <span class="material-icons-round item-icon">text_format</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Helvetica</span>
+                                <span class="item-sub">Classic Swiss Standard</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                        <div class="dropdown-item" data-font="Georgia" style="font-family: Georgia, serif;">
+                            <span class="material-icons-round item-icon">menu_book</span>
+                            <div class="dropdown-item-info">
+                                <span class="item-title">Georgia</span>
+                                <span class="item-sub">Readable Warm Serif</span>
+                            </div>
+                            <span class="material-icons-round check-icon">check</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Font Size Stepper -->
+                <div class="stepper-group" title="Font Size">
+                    <button class="stepper-btn" id="btn-font-size-dec">
+                        <span class="material-icons-round">remove</span>
+                    </button>
+                    <input type="number" id="text-font-size-input" class="stepper-input" value="64" min="12" max="180" />
+                    <button class="stepper-btn" id="btn-font-size-inc">
+                        <span class="material-icons-round">add</span>
+                    </button>
+                </div>
+
+                <!-- Bold & Italic -->
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-text-bold" title="Bold (Ctrl+B)">
+                        <span class="material-icons-round">format_bold</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-text-italic" title="Italic (Ctrl+I)">
+                        <span class="material-icons-round">format_italic</span>
+                    </button>
+                </div>
+
+                <!-- Text Color -->
+                <div class="color-picker-wrapper" title="Text Color">
+                    <div class="color-swatch-box" id="text-color-swatch" style="background-color: #0f172a;"></div>
+                    <input type="color" id="text-color-input" value="#0f172a" class="hidden-color-input" />
+                </div>
+
+                <!-- Text Align -->
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn active" id="btn-align-left" title="Align Left">
+                        <span class="material-icons-round">format_align_left</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-align-center" title="Align Center">
+                        <span class="material-icons-round">format_align_center</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-align-right" title="Align Right">
+                        <span class="material-icons-round">format_align_right</span>
+                    </button>
+                </div>
+
+                <div class="ribbon-sep"></div>
+
+                <!-- Layering, Duplicate, Delete -->
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-text-bring-forward" title="Bring Forward">
+                        <span class="material-icons-round">flip_to_front</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-text-send-back" title="Send Backward">
+                        <span class="material-icons-round">flip_to_back</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-text-clone" title="Duplicate (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="ribbon-icon-btn danger" id="btn-text-delete" title="Delete Element (Del / Backspace)">
+                        <span class="material-icons-round">delete_outline</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Context 3: Shape Formatting (Active when Rect / Circle / Card selected) -->
+            <div class="ribbon-context-panel hidden" id="context-panel-shape">
+                <span class="context-badge">Shape</span>
+
+                <!-- Fill Color -->
+                <div class="swatch-label-group" title="Fill Color">
+                    <span class="micro-label">Fill</span>
+                    <div class="color-picker-wrapper">
+                        <div class="color-swatch-box" id="shape-fill-swatch" style="background-color: #f8fafc;"></div>
+                        <input type="color" id="shape-fill-input" value="#f8fafc" class="hidden-color-input" />
+                    </div>
+                </div>
+
+                <!-- Border Color -->
+                <div class="swatch-label-group" title="Border Color">
+                    <span class="micro-label">Border</span>
+                    <div class="color-picker-wrapper">
+                        <div class="color-swatch-box" id="shape-stroke-swatch" style="background-color: #e2e8f0;"></div>
+                        <input type="color" id="shape-stroke-input" value="#e2e8f0" class="hidden-color-input" />
+                    </div>
+                </div>
+
+                <!-- Border Thickness Pills -->
+                <div class="segmented-pill-group" title="Border Thickness">
+                    <button class="seg-btn active" id="btn-border-0">0px</button>
+                    <button class="seg-btn" id="btn-border-2">2px</button>
+                    <button class="seg-btn" id="btn-border-4">4px</button>
+                </div>
+
+                <div class="ribbon-sep"></div>
+
+                <!-- Layering, Duplicate, Delete -->
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-shape-bring-forward" title="Bring Forward">
+                        <span class="material-icons-round">flip_to_front</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-shape-send-back" title="Send Backward">
+                        <span class="material-icons-round">flip_to_back</span>
+                    </button>
+                    <button class="ribbon-icon-btn" id="btn-shape-clone" title="Duplicate (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="ribbon-icon-btn danger" id="btn-shape-delete" title="Delete Element (Del / Backspace)">
+                        <span class="material-icons-round">delete_outline</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Context 4: Line Formatting (Active when line is selected) -->
+            <div class="ribbon-context-panel hidden" id="context-panel-line">
+                <span class="context-badge">Line</span>
+                <div class="swatch-label-group" title="Line Color">
+                    <span class="micro-label">Color</span>
+                    <div class="color-picker-wrapper">
+                        <div class="color-swatch-box" id="line-color-swatch" style="background-color: #2563eb;"></div>
+                        <input type="color" id="line-color-input" value="#2563eb" class="hidden-color-input" />
+                    </div>
+                </div>
+
+                <div class="ribbon-sep"></div>
+
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-line-clone" title="Duplicate (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="ribbon-icon-btn danger" id="btn-line-delete" title="Delete Element">
+                        <span class="material-icons-round">delete_outline</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Context 5: Image Formatting -->
+            <div class="ribbon-context-panel hidden" id="context-panel-image">
+                <span class="context-badge">Image</span>
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-image-clone" title="Duplicate (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="ribbon-icon-btn danger" id="btn-image-delete" title="Delete Image">
+                        <span class="material-icons-round">delete_outline</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Context 6: Multi-Selection (Active when multiple objects selected) -->
+            <div class="ribbon-context-panel hidden" id="context-panel-multi">
+                <span class="context-badge" id="multi-selection-count">Multiple Selected</span>
+                <button class="ribbon-action-btn" id="btn-multi-group" title="Group or Ungroup Selection (Ctrl+G)">
+                    <span class="material-icons-round">group_work</span>
+                    <span>Group / Ungroup</span>
+                </button>
+                <div class="ribbon-btn-group">
+                    <button class="ribbon-icon-btn" id="btn-multi-clone" title="Duplicate Selection (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="ribbon-icon-btn danger" id="btn-multi-delete" title="Delete Selection">
+                        <span class="material-icons-round">delete_outline</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pinned Right Action Zone: ALWAYS 100% VISIBLE & ACCESSIBLE ON ANY SCREEN -->
+        <div class="ribbon-universal-actions" id="ribbon-universal-actions">
+            <button class="ribbon-action-pill-btn" id="btn-universal-clone" title="Duplicate Selected Object (Ctrl+D)">
+                <span class="material-icons-round">content_copy</span>
+                <span>Duplicate</span>
+            </button>
+            <button class="ribbon-action-pill-btn" id="btn-universal-layer-up" title="Bring Forward">
+                <span class="material-icons-round">flip_to_front</span>
+            </button>
+            <button class="ribbon-action-pill-btn" id="btn-universal-layer-down" title="Send Backward">
+                <span class="material-icons-round">flip_to_back</span>
+            </button>
+            <div class="ribbon-sep"></div>
+            <button class="ribbon-action-pill-btn btn-delete-highlight" id="btn-universal-delete" title="Delete Selected Object (Del / Backspace)">
+                <span class="material-icons-round">delete</span>
+                <span>Delete</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- 3. MAIN APP WORKSPACE -->
+    <main id="app-workspace">
+
+        <!-- Left Slide Reel / Thumbnails Strip -->
+        <aside id="slide-reel-sidebar">
+            <div class="reel-header">
+                <span class="reel-title">Slides</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                    <button class="btn-add-slide-hero" id="btn-add-slide" title="Add New Slide with Templates">
+                        <span class="material-icons-round">add</span>
+                        <span>New</span>
+                    </button>
+                    <!-- Close button for mobile drawer -->
+                    <button class="icon-btn-ghost mobile-only-flex" id="btn-close-reel-drawer" title="Close Slides Drawer" style="padding: 4px;">
+                        <span class="material-icons-round" style="font-size: 18px;">close</span>
+                    </button>
+                </div>
+            </div>
+            
+            <div id="slide-thumbnails-list">
+                <!-- Dynamically populated thumbnail cards -->
+            </div>
+        </aside>
+
+        <!-- Backdrop overlay for mobile slide drawer -->
+        <div id="mobile-reel-backdrop" class="modal-overlay hidden" style="z-index: 150;"></div>
+
+        <!-- Center Slide Workspace (Canvas Stage + Bottom Docked Speaker Notes) -->
+        <div id="stage-viewport-area">
+            <section id="canvas-wrapper">
+                <div id="slide-stage-card">
+                    <canvas id="c"></canvas>
+                </div>
+
+                <!-- Floating Quick Action Pill (Direct 1-Click Action right above active element!) -->
+                <div id="floating-selection-pill" class="floating-selection-pill hidden">
+                    <!-- Mobile Text Direct Edit Button -->
+                    <button class="floating-pill-btn mobile-only-btn" id="pill-edit-text-btn" title="Edit Text Content">
+                        <span class="material-icons-round">edit</span>
+                        <span>Edit</span>
+                    </button>
+                    <button class="floating-pill-btn" id="pill-clone-btn" title="Duplicate (Ctrl+D)">
+                        <span class="material-icons-round">content_copy</span>
+                    </button>
+                    <button class="floating-pill-btn" id="pill-forward-btn" title="Bring Forward">
+                        <span class="material-icons-round">flip_to_front</span>
+                    </button>
+                    <button class="floating-pill-btn" id="pill-backward-btn" title="Send Backward">
+                        <span class="material-icons-round">flip_to_back</span>
+                    </button>
+                    <div class="floating-pill-sep"></div>
+                    <button class="floating-pill-btn pill-btn-danger" id="pill-delete-btn" title="Delete Element (Del / Backspace)">
+                        <span class="material-icons-round">delete_outline</span>
+                        <span>Delete</span>
+                    </button>
+                </div>
+
+                <!-- Floating Canvas Zoom & Pan Control Pill -->
+                <div id="canvas-zoom-pill" class="canvas-zoom-pill" title="Slide Zoom & Fit">
+                    <button id="btn-zoom-fit" class="zoom-pill-btn active" title="Fit Slide to Screen">
+                        <span class="material-icons-round">fit_screen</span>
+                        <span class="zoom-btn-label">Fit</span>
+                    </button>
+                    <button id="btn-zoom-out" class="zoom-pill-btn" title="Zoom Out (-)">
+                        <span class="material-icons-round">remove</span>
+                    </button>
+                    <button id="btn-zoom-reset" class="zoom-pill-badge" title="Tap to Toggle 100% / Fit">
+                        <span id="zoom-level-text">Fit</span>
+                    </button>
+                    <button id="btn-zoom-in" class="zoom-pill-btn" title="Zoom In (+)">
+                        <span class="material-icons-round">add</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Speaker Notes Drawer (Cleanly docked below canvas, 0% overlap with canvas or toolbars!) -->
+            <div id="speaker-notes-drawer" class="hidden">
+                <div class="notes-header">
+                    <div class="notes-title-wrap">
+                        <span class="material-icons-round" style="font-size: 16px; color: #2563eb;">notes</span>
+                        <span class="notes-title">SPEAKER NOTES (PRIVATE TO PRESENTER)</span>
+                    </div>
+                    <button class="thumb-btn-mini" id="btn-close-notes" title="Close Notes">
+                        <span class="material-icons-round">close</span>
+                    </button>
+                </div>
+                <textarea id="speaker-notes-input" placeholder="Type key talking points, presentation cues, and takeaways for this slide..."></textarea>
+            </div>
+        </div>
+    </main>
+
+    <!-- 3.5 MOBILE TEXT QUICK-EDIT SHEET (Zero-squinting native text editing on mobile) -->
+    <div id="mobile-text-modal" class="modal-overlay hidden">
+        <div class="mobile-sheet-card">
+            <div class="mobile-sheet-header">
+                <div class="mobile-sheet-title">
+                    <span class="material-icons-round" style="color: #2563eb;">edit_note</span>
+                    <span>Edit Slide Text</span>
+                </div>
+                <div class="mobile-sheet-actions">
+                    <button id="btn-mobile-text-cancel" class="mobile-sheet-btn-cancel">Cancel</button>
+                    <button id="btn-mobile-text-save" class="mobile-sheet-btn-save">Done ✓</button>
+                </div>
+            </div>
+            <div class="mobile-sheet-body">
+                <textarea id="mobile-text-editor-input" rows="5" placeholder="Type or edit slide text here..."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3.6 MOBILE SLIDE BACKGROUND PICKER SHEET -->
+    <div id="mobile-bg-modal" class="modal-overlay hidden">
+        <div class="mobile-sheet-card">
+            <div class="mobile-sheet-header">
+                <div class="mobile-sheet-title">
+                    <span class="material-icons-round" style="color: #2563eb;">palette</span>
+                    <span>Slide Background Color</span>
+                </div>
+                <button id="btn-close-bg-modal" class="mobile-sheet-btn-cancel">Close</button>
+            </div>
+            <div class="mobile-sheet-body">
+                <div class="mobile-palette-grid">
+                    <button class="mobile-color-card" data-color="#ffffff" style="background: #ffffff; border: 2px solid #e2e8f0; color: #0f172a;">
+                        <span>Pure White</span>
+                    </button>
+                    <button class="mobile-color-card" data-color="#f8fafc" style="background: #f8fafc; border: 2px solid #cbd5e1; color: #0f172a;">
+                        <span>Soft Slate</span>
+                    </button>
+                    <button class="mobile-color-card" data-color="#fefce8" style="background: #fefce8; border: 2px solid #fde047; color: #713f12;">
+                        <span>Warm Editorial</span>
+                    </button>
+                    <button class="mobile-color-card" data-color="#eff6ff" style="background: #eff6ff; border: 2px solid #bfdbfe; color: #1e3a8a;">
+                        <span>Ice Blue</span>
+                    </button>
+                    <button class="mobile-color-card" data-color="#0f172a" style="background: #0f172a; color: #ffffff;">
+                        <span>Executive Dark</span>
+                    </button>
+                    <button class="mobile-color-card" data-color="#1e1b4b" style="background: #1e1b4b; color: #ffffff;">
+                        <span>Midnight Navy</span>
+                    </button>
+                </div>
+                <div class="mobile-custom-color-row">
+                    <span style="font-size: 13px; font-weight: 600; color: #475569;">Custom Color:</span>
+                    <input type="color" id="mobile-bg-custom-picker" value="#ffffff" class="swatch-color-picker" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. SLIDE TEMPLATES PICKER MODAL -->
+    <div id="templates-modal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Choose a Slide Layout</h3>
+                <button class="thumb-btn-mini" id="close-templates-modal">
+                    <span class="material-icons-round">close</span>
+                </button>
+            </div>
+            <div class="templates-grid" id="templates-grid">
+                <!-- Dynamically loaded layout cards -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. CINEMA FULLSCREEN PRESENTATION MODE -->
+    <div id="presentation-overlay" class="hidden">
+        <div id="presenter-stage">
+            <div id="presenter-slide-display"></div>
+        </div>
+
+        <!-- Virtual Laser Pointer Red Glowing Dot -->
+        <div id="presenter-laser-dot" class="hidden"></div>
+
+        <!-- Live Annotation Canvas -->
+        <canvas id="presenter-pen-canvas"></canvas>
+
+        <!-- Presenter Bottom HUD -->
+        <div id="presenter-hud">
+            <button class="hud-btn" id="btn-present-prev" title="Previous Slide (←)">
+                <span class="material-icons-round">arrow_back</span>
+            </button>
+            <span id="presenter-slide-counter">1 / 1</span>
+            <button class="hud-btn" id="btn-present-next" title="Next Slide (→ / Space)">
+                <span class="material-icons-round">arrow_forward</span>
+            </button>
+
+            <div class="hud-sep"></div>
+
+            <div style="display: flex; align-items: center; gap: 4px;">
+                <span class="material-icons-round" style="font-size: 16px; opacity: 0.7;">timer</span>
+                <span id="presenter-timer">00:00</span>
+            </div>
+
+            <div class="hud-sep"></div>
+
+            <button class="hud-btn" id="btn-toggle-laser" title="Virtual Laser Pointer (L)">
+                <span class="material-icons-round">adjust</span>
+            </button>
+            <button class="hud-btn" id="btn-toggle-pen" title="Live Drawing Pen (P)">
+                <span class="material-icons-round">brush</span>
+            </button>
+            <button class="hud-btn" id="btn-clear-pen" title="Clear Annotations (C)">
+                <span class="material-icons-round">cleaning_services</span>
+            </button>
+
+            <div class="hud-sep"></div>
+
+            <button class="hud-btn" id="btn-present-exit" title="Exit Presentation (Esc)">
+                <span class="material-icons-round">fullscreen_exit</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 6. STATUS & OFFLINE TOASTS -->
+    <div id="status-toast">Saved</div>
+    <div id="offline-toast" class="offline-banner hidden">
+        <span class="material-icons-round">cloud_off</span>
+        <span>Offline Mode — All edits saved locally</span>
+    </div>
+
+    <!-- 7. APPLICATION BOOTSTRAP -->
+    <!-- Native Modular ES6 Architecture (Loads on HTTP/HTTPS Live Server) -->
+    <script type="module" src="src/main.js"></script>
+
+    <!-- Universal Offline Fallback (Loads on file:// protocol desktop double-click) -->
+    <script>
+        if (window.location.protocol === 'file:') {
+            const fallbackScript = document.createElement('script');
+            fallbackScript.src = 'script.js';
+            document.body.appendChild(fallbackScript);
+        }
+    </script>
+
+    <!-- 8. PROGRESSIVE WEB APP (PWA) SERVICE WORKER & INSTALL HANDLER -->
+    <script>
+        // Service Worker Registration for Instant Offline Performance
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').then((reg) => {
+                    console.log('[PWA] ServiceWorker active with scope:', reg.scope);
+                }).catch((err) => {
+                    console.warn('[PWA] ServiceWorker registration skipped:', err);
+                });
+            });
+        }
+
+        // PWA Native Installation Handling
+        let deferredPrompt = null;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const installBtn = document.getElementById('btn-pwa-install');
+            if (installBtn) installBtn.classList.remove('hidden');
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredPrompt = null;
+            document.getElementById('btn-pwa-install')?.classList.add('hidden');
+            const toast = document.getElementById('status-toast');
+            if (toast) {
+                toast.innerText = 'App Installed Successfully!';
+                toast.classList.add('visible');
+                setTimeout(() => toast.classList.remove('visible'), 2500);
+            }
+        });
+
+        document.getElementById('btn-pwa-install')?.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                document.getElementById('btn-pwa-install')?.classList.add('hidden');
+            }
+            deferredPrompt = null;
+        });
+
+        // Online & Offline Network Resilience
+        window.addEventListener('online', () => {
+            const toast = document.getElementById('status-toast');
+            if (toast) {
+                toast.innerText = 'Connected — All Synced';
+                toast.classList.add('visible');
+                setTimeout(() => toast.classList.remove('visible'), 2000);
+            }
+            document.getElementById('offline-toast')?.classList.add('hidden');
+        });
+
+        window.addEventListener('offline', () => {
+            document.getElementById('offline-toast')?.classList.remove('hidden');
+        });
+        if (!navigator.onLine) {
+            document.getElementById('offline-toast')?.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
